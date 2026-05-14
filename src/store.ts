@@ -19,22 +19,45 @@ export type Caption = {
 
 export type CaptionDefaults = Omit<Caption, "id" | "text" | "start" | "end"> & {
   durationSec: number;
+  autoCaptionDurationSec: number;
 };
 
 const FACTORY_DEFAULTS: CaptionDefaults = {
   durationSec: 3,
+  autoCaptionDurationSec: 2,
   x: 0.5,
   y: 0.85,
   fontFamily: "Arial",
-  fontSize: 48,
-  color: "#ffffff",
+  fontSize: 24,
+  color: "#000000",
   strokeColor: "#000000",
   strokeWidth: 0,
-  bgColor: "#000000",
+  bgColor: "#ffffff",
   bgEnabled: true,
 };
 
 const DEFAULTS_KEY = "captioner.defaults.v1";
+const THEME_KEY = "captioner.theme.v1";
+
+export type Theme = "light" | "dark";
+
+function loadTheme(): Theme {
+  try {
+    const v = localStorage.getItem(THEME_KEY);
+    if (v === "light" || v === "dark") return v;
+  } catch {
+    // ignore
+  }
+  return "light";
+}
+
+function saveTheme(t: Theme) {
+  try {
+    localStorage.setItem(THEME_KEY, t);
+  } catch {
+    // ignore
+  }
+}
 
 function loadDefaults(): CaptionDefaults {
   try {
@@ -75,9 +98,11 @@ type State = {
   /** Set transiently when a caption is freshly added so the panel can focus its text field. */
   focusTextForId: string | null;
   exporting: boolean;
+  transcribing: boolean;
   zoom: number;
 
   defaults: CaptionDefaults;
+  theme: Theme;
 
   _past: Snapshot[];
   _future: Snapshot[];
@@ -93,7 +118,10 @@ type State = {
   setCurrentTime: (t: number) => void;
   setPlaying: (p: boolean) => void;
   setExporting: (e: boolean) => void;
+  setTranscribing: (t: boolean) => void;
   setZoom: (z: number) => void;
+  replaceCaptions: (captions: Caption[]) => void;
+  clearCaptions: () => void;
   addCaption: () => string | null;
   updateCaption: (id: string, patch: Partial<Caption>) => void;
   setCaptions: (next: Caption[]) => void;
@@ -103,6 +131,7 @@ type State = {
 
   setDefaults: (patch: Partial<CaptionDefaults>) => void;
   resetDefaults: () => void;
+  setTheme: (t: Theme) => void;
 
   beginTransaction: () => void;
   commitTransaction: () => void;
@@ -160,9 +189,11 @@ export const useStore = create<State>((set, get) => ({
   selectedId: null,
   focusTextForId: null,
   exporting: false,
+  transcribing: false,
   zoom: 1,
 
   defaults: loadDefaults(),
+  theme: loadTheme(),
 
   _past: [],
   _future: [],
@@ -189,7 +220,18 @@ export const useStore = create<State>((set, get) => ({
   setCurrentTime: (t) => set({ currentTime: t }),
   setPlaying: (p) => set({ playing: p }),
   setExporting: (e) => set({ exporting: e }),
+  setTranscribing: (t) => set({ transcribing: t }),
   setZoom: (z) => set({ zoom: Math.max(0.1, Math.min(50, z)) }),
+
+  replaceCaptions: (next) =>
+    get().recordEdit(() => {
+      set({ captions: next, selectedId: null, focusTextForId: null });
+    }),
+
+  clearCaptions: () =>
+    get().recordEdit(() => {
+      set({ captions: [], selectedId: null, focusTextForId: null });
+    }),
 
   addCaption: () => {
     const { currentTime, duration, captions, defaults } = get();
@@ -248,6 +290,11 @@ export const useStore = create<State>((set, get) => ({
   resetDefaults: () => {
     saveDefaults(FACTORY_DEFAULTS);
     set({ defaults: { ...FACTORY_DEFAULTS } });
+  },
+
+  setTheme: (t) => {
+    saveTheme(t);
+    set({ theme: t });
   },
 
   beginTransaction: () => {

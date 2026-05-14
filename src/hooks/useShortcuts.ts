@@ -17,11 +17,22 @@ const isTextInput = (el: EventTarget | null): boolean => {
 export function useShortcuts() {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      const mod = e.metaKey || e.ctrlKey;
-      if (!mod) return;
-      // Skip if user is typing into a text field — native undo there
+      // Skip everything while the user is typing into a text field — let the
+      // browser handle space, undo, etc. natively.
       if (isTextInput(e.target)) return;
 
+      // Space = play/pause toggle. Only when a video is loaded.
+      if (e.code === "Space" && !e.metaKey && !e.ctrlKey && !e.altKey) {
+        const s = useStore.getState();
+        if (s.videoSrc) {
+          e.preventDefault();
+          s.setPlaying(!s.playing);
+        }
+        return;
+      }
+
+      const mod = e.metaKey || e.ctrlKey;
+      if (!mod) return;
       const key = e.key.toLowerCase();
       if (key === "z" && !e.shiftKey) {
         e.preventDefault();

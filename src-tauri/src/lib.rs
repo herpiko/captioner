@@ -1,5 +1,8 @@
+mod whisper;
+
 use serde::{Deserialize, Serialize};
 use std::process::Command;
+use tauri::AppHandle;
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct Caption {
@@ -58,6 +61,66 @@ fn hex_to_ass_color(hex: &str) -> String {
     let g = u8::from_str_radix(&h[2..4], 16).unwrap_or(255);
     let b = u8::from_str_radix(&h[4..6], 16).unwrap_or(255);
     format!("&H00{:02X}{:02X}{:02X}", b, g, r)
+}
+
+/// Wrap text into lines whose rendered width fits within `max_px`. The
+/// estimate uses a per-glyph average width ≈ font_size * 0.55, which is a
+/// reasonable approximation across the common fonts we offer. Joins lines
+/// with the literal escape sequence "\N" (already-escaped for ASS).
+fn wrap_text_for_ass(text: &str, font_size: f64, max_px: f64) -> String {
+    let max_chars = ((max_px / (font_size * 0.55)).floor() as usize).max(8);
+    let mut out = String::new();
+    for raw_line in text.split('\n') {
+        let mut current = String::new();
+        for word in raw_line.split_whitespace() {
+            // Hard-wrap a single very long word.
+            if word.len() > max_chars {
+                if !current.is_empty() {
+                    if !out.is_empty() {
+                        out.push_str("\\N");
+                    }
+                    out.push_str(&current);
+                    current.clear();
+                }
+                let bytes = word.as_bytes();
+                let mut i = 0;
+                while i < bytes.len() {
+                    let end = (i + max_chars).min(bytes.len());
+                    if !out.is_empty() {
+                        out.push_str("\\N");
+                    }
+                    out.push_str(std::str::from_utf8(&bytes[i..end]).unwrap_or(""));
+                    i = end;
+                }
+                continue;
+            }
+            let candidate_len = if current.is_empty() {
+                word.len()
+            } else {
+                current.len() + 1 + word.len()
+            };
+            if candidate_len > max_chars && !current.is_empty() {
+                if !out.is_empty() {
+                    out.push_str("\\N");
+                }
+                out.push_str(&current);
+                current.clear();
+                current.push_str(word);
+            } else {
+                if !current.is_empty() {
+                    current.push(' ');
+                }
+                current.push_str(word);
+            }
+        }
+        if !current.is_empty() {
+            if !out.is_empty() {
+                out.push_str("\\N");
+            }
+            out.push_str(&current);
+        }
+    }
+    out
 }
 
 fn escape_ass_text(text: &str) -> String {
@@ -222,13 +285,47 @@ async fn export_video(req: ExportRequest) -> Result<String, String> {
     .map_err(|e| format!("spawn_blocking join: {}", e))?
 }
 
+#[tauri::command]
+fn model_status(app: AppHandle) -> Result<whisper::ModelStatus, String> {
+    whisper::model_status(&app)
+}
+
+#[tauri::command]
+async fn download_model(app: AppHandle) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || whisper::download_model(app))
+        .await
+        .map_err(|e| format!("spawn_blocking join: {}", e))?
+}
+
+#[tauri::command]
+async fn transcribe(
+    app: AppHandle,
+    req: whisper::TranscribeRequest,
+) -> Result<Vec<whisper::Segment>, String> {
+    tauri::async_runtime::spawn_blocking(move || whisper::transcribe(app, req))
+        .await
+        .map_err(|e| format!("spawn_blocking join: {}", e))?
+}
+
+#[tauri::command]
+fn clear_transcribe_cache(app: AppHandle) -> Result<usize, String> {
+    whisper::clear_cache(&app)
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
-        .invoke_handler(tauri::generate_handler![probe_video, export_video])
+        .invoke_handler(tauri::generate_handler![
+            probe_video,
+            export_video,
+            model_status,
+            download_model,
+            transcribe,
+            clear_transcribe_cache
+        ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

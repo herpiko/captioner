@@ -2,23 +2,101 @@
 @tailwind components;
 @tailwind utilities;
 
+/* ---------- Theme tokens ---------- */
+:root,
+[data-theme="light"] {
+  --bg-app: #f5f6f8;        /* root window background */
+  --bg-surface: #ffffff;    /* toolbar, panel, dialog */
+  --bg-surface-2: #f0f1f4;  /* inset panels, track */
+  --bg-surface-3: #e5e7eb;  /* timeline ruler / strong inset */
+  --bg-hover: #e9ecef;
+  --border-line: #d8dbe1;
+  --border-line-strong: #c5c9d1;
+  --text: #1a1d22;
+  --text-muted: #6b7280;
+  --text-faint: #9aa0a8;
+  --input-bg: #ffffff;
+  --input-border: #c5c9d1;
+  --shadow: 0 10px 30px rgba(15, 23, 42, 0.08);
+  --overlay-bg: rgba(15, 23, 42, 0.45);
+  --preview-bg: #0b0d10;    /* video canvas always dark */
+  --caption-block: rgba(59, 130, 246, 0.18);
+  --caption-block-hover: rgba(59, 130, 246, 0.28);
+  --caption-block-selected: #2563eb;
+  --caption-block-text: #1e3a8a;
+  --caption-block-text-selected: #ffffff;
+  --accent-text: #1d4ed8;
+}
+
+[data-theme="dark"] {
+  --bg-app: #0b0d10;
+  --bg-surface: #0a0a0a;       /* matches old bg-neutral-950 */
+  --bg-surface-2: #171717;     /* matches old bg-neutral-900 */
+  --bg-surface-3: #262626;     /* matches old bg-neutral-800 */
+  --bg-hover: #404040;
+  --border-line: #262626;
+  --border-line-strong: #404040;
+  --text: #e7eaf0;
+  --text-muted: #a3a3a3;
+  --text-faint: #737373;
+  --input-bg: #1a1d22;
+  --input-border: #2a2f37;
+  --shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.4);
+  --overlay-bg: rgba(0, 0, 0, 0.7);
+  --preview-bg: #000000;
+  --caption-block: rgba(30, 58, 138, 0.6);
+  --caption-block-hover: rgba(30, 64, 175, 0.7);
+  --caption-block-selected: #2563eb;
+  --caption-block-text: #dbeafe;
+  --caption-block-text-selected: #ffffff;
+  --accent-text: #93c5fd;
+}
+
 html, body, #root {
   height: 100%;
   margin: 0;
-  background: #0b0d10;
-  color: #e7eaf0;
+  background: var(--bg-app);
+  color: var(--text);
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
   overflow: hidden;
 }
 
-input[type="number"], input[type="text"], select {
-  background: #1a1d22;
-  border: 1px solid #2a2f37;
+input[type="number"], input[type="text"], select, textarea {
+  background: var(--input-bg);
+  border: 1px solid var(--input-border);
   border-radius: 4px;
   padding: 4px 8px;
   color: inherit;
 }
 
-button {
-  cursor: pointer;
+button { cursor: pointer; }
+
+/* ---------- Semantic utility classes ---------- */
+.surface       { background: var(--bg-surface); color: var(--text); }
+.surface-2     { background: var(--bg-surface-2); color: var(--text); }
+.surface-3     { background: var(--bg-surface-3); color: var(--text); }
+.text-default  { color: var(--text); }
+.text-muted    { color: var(--text-muted); }
+.text-faint    { color: var(--text-faint); }
+.text-accent   { color: var(--accent-text); }
+.border-line   { border-color: var(--border-line); }
+.border-line-strong { border-color: var(--border-line-strong); }
+.btn-soft {
+  background: var(--bg-surface-2);
+  color: var(--text);
 }
+.btn-soft:hover:not(:disabled) { background: var(--bg-hover); }
+.dialog-shadow { box-shadow: var(--shadow); }
+.overlay-bg    { background: var(--overlay-bg); }
+.preview-bg    { background: var(--preview-bg); }
+.caption-block {
+  background: var(--caption-block);
+  color: var(--caption-block-text);
+}
+.caption-block:hover { background: var(--caption-block-hover); }
+.caption-block-selected {
+  background: var(--caption-block-selected);
+  color: var(--caption-block-text-selected);
+}
+.dialog-backdrop { background: rgba(15, 23, 42, 0.35); }
+[data-theme="dark"] .dialog-backdrop { background: rgba(0, 0, 0, 0.6); }

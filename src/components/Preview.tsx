@@ -77,7 +77,7 @@ export function Preview() {
 
   if (!videoSrc) {
     return (
-      <div className="flex-1 flex items-center justify-center text-neutral-500">
+      <div className="flex-1 flex items-center justify-center text-muted">
         Open a video to begin
       </div>
     );
@@ -86,7 +86,7 @@ export function Preview() {
   const aspect = videoWidth / videoHeight || 16 / 9;
 
   return (
-    <div className="flex-1 flex items-center justify-center bg-black p-4 overflow-hidden">
+    <div className="flex-1 flex items-center justify-center preview-bg p-4 overflow-hidden">
       <div
         ref={containerRef}
         className="relative max-w-full max-h-full"
@@ -160,13 +160,16 @@ function CaptionOverlay({
         left: `${c.x * 100}%`,
         top: `${c.y * 100}%`,
         transform: "translate(-50%, -50%)",
+        maxWidth: "90%",
         fontFamily: c.fontFamily,
         fontSize: `${fs}px`,
         color: c.color,
         textShadow,
         background: c.bgEnabled ? c.bgColor : "transparent",
         padding: c.bgEnabled ? "0.1em 0.4em" : 0,
-        whiteSpace: "pre",
+        whiteSpace: "pre-wrap",
+        wordBreak: "break-word",
+        textAlign: "center",
         lineHeight: 1.2,
         cursor: "move",
         outline: selected ? "1px dashed #6aa9ff" : "none",

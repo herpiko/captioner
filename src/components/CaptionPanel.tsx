@@ -40,7 +40,7 @@ export function CaptionPanel() {
 
   if (!c) {
     return (
-      <aside className="w-72 border-l border-neutral-800 bg-neutral-950 p-4 text-sm text-neutral-500">
+      <aside className="w-72 border-l border-line surface p-4 text-sm text-muted">
         Select a caption to edit
       </aside>
     );
@@ -64,7 +64,7 @@ export function CaptionPanel() {
   const discrete = (patch: Partial<typeof c>) => recordEdit(() => u(patch));
 
   return (
-    <aside className="w-72 border-l border-neutral-800 bg-neutral-950 p-4 text-sm overflow-y-auto">
+    <aside className="w-72 border-l border-line surface p-4 text-sm overflow-y-auto">
       <div className="flex items-center justify-between mb-3">
         <h3 className="font-semibold">Caption</h3>
         <button
@@ -82,7 +82,7 @@ export function CaptionPanel() {
           value={c.text}
           onChange={(e) => u({ text: e.target.value })}
           {...textProps}
-          className="w-full bg-neutral-900 border border-neutral-800 rounded px-2 py-1 resize-none"
+          className="w-full rounded px-2 py-1 resize-none"
         />
       </Field>
 
@@ -222,7 +222,7 @@ function Field({
 }) {
   return (
     <div className="mb-3">
-      <label className="block text-xs text-neutral-400 mb-1">{label}</label>
+      <label className="block text-xs text-muted mb-1">{label}</label>
       {children}
     </div>
   );

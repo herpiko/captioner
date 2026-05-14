@@ -62,7 +62,7 @@ export function Timeline() {
 
   if (!duration) {
     return (
-      <div className="h-40 border-t border-neutral-800 bg-neutral-950 flex items-center justify-center text-neutral-600 text-sm">
+      <div className="h-40 border-t border-line surface flex items-center justify-center text-faint text-sm">
         Timeline appears after loading a video
       </div>
     );
@@ -152,7 +152,7 @@ export function Timeline() {
   }
 
   return (
-    <div className="relative border-t border-neutral-800 bg-neutral-950 select-none">
+    <div className="relative border-t border-line surface select-none">
       <div
         ref={viewportRef}
         className="overflow-x-auto overflow-y-hidden"
@@ -168,17 +168,17 @@ export function Timeline() {
         >
           {/* Ruler — pointerdown scrubs the playhead */}
           <div
-            className="absolute top-0 left-0 right-0 border-b border-neutral-800 cursor-ew-resize"
+            className="absolute top-0 left-0 right-0 border-b border-line cursor-ew-resize"
             style={{ height: RULER_HEIGHT }}
             onPointerDown={startScrub}
           >
             {marks.map((t) => (
               <div
                 key={t}
-                className="absolute top-0 text-[10px] text-neutral-500"
+                className="absolute top-0 text-[10px] text-muted"
                 style={{ left: `${(t / duration) * 100}%` }}
               >
-                <div className="h-2 w-px bg-neutral-700" />
+                <div className="h-2 w-px" style={{ background: "var(--border-line-strong)" }} />
                 <div className="px-1 whitespace-nowrap">{formatTime(t)}</div>
               </div>
             ))}
@@ -186,7 +186,7 @@ export function Timeline() {
 
           {/* Track */}
           <div
-            className="absolute left-0 right-0 bg-neutral-900"
+            className="absolute left-0 right-0 surface-2"
             style={{ top: RULER_HEIGHT + 4, height: TRACK_HEIGHT }}
           >
             {captions.map((c) => {
@@ -198,9 +198,7 @@ export function Timeline() {
                   key={c.id}
                   onPointerDown={(e) => onBlockDrag(e, c, "move")}
                   className={`absolute top-1 bottom-1 rounded text-xs px-2 flex items-center overflow-hidden ${
-                    selected
-                      ? "bg-blue-600 text-white"
-                      : "bg-blue-900/60 text-blue-100 hover:bg-blue-800/70"
+                    selected ? "caption-block-selected" : "caption-block"
                   }`}
                   style={{
                     left: `${left}%`,
@@ -210,12 +208,12 @@ export function Timeline() {
                 >
                   <div
                     onPointerDown={(e) => onBlockDrag(e, c, "left")}
-                    className="absolute left-0 top-0 bottom-0 w-1.5 cursor-ew-resize bg-white/20"
+                    className="absolute left-0 top-0 bottom-0 w-1.5 cursor-ew-resize bg-black/20"
                   />
                   <span className="truncate pointer-events-none">{c.text}</span>
                   <div
                     onPointerDown={(e) => onBlockDrag(e, c, "right")}
-                    className="absolute right-0 top-0 bottom-0 w-1.5 cursor-ew-resize bg-white/20"
+                    className="absolute right-0 top-0 bottom-0 w-1.5 cursor-ew-resize bg-black/20"
                   />
                 </div>
               );
@@ -250,10 +248,10 @@ function ZoomControls() {
     setZoom(clamp(zoom * factor, MIN_ZOOM, MAX_ZOOM));
 
   return (
-    <div className="absolute right-2 bottom-2 flex items-center gap-1 bg-neutral-900/90 border border-neutral-800 rounded px-1 py-0.5 text-xs">
+    <div className="absolute right-2 bottom-2 flex items-center gap-1 surface border border-line rounded px-1 py-0.5 text-xs dialog-shadow">
       <button
         onClick={() => step(1 / 1.4)}
-        className="w-6 h-6 rounded hover:bg-neutral-700 disabled:opacity-40"
+        className="w-6 h-6 rounded btn-soft disabled:opacity-40"
         disabled={zoom <= MIN_ZOOM + 1e-6}
         title="Zoom out"
       >
@@ -261,14 +259,14 @@ function ZoomControls() {
       </button>
       <button
         onClick={() => setZoom(1)}
-        className="px-1.5 h-6 rounded hover:bg-neutral-700 tabular-nums"
+        className="px-1.5 h-6 rounded btn-soft tabular-nums"
         title="Reset zoom"
       >
         {Math.round(zoom * 100)}%
       </button>
       <button
         onClick={() => step(1.4)}
-        className="w-6 h-6 rounded hover:bg-neutral-700 disabled:opacity-40"
+        className="w-6 h-6 rounded btn-soft disabled:opacity-40"
         disabled={zoom >= MAX_ZOOM - 1e-6}
         title="Zoom in"
       >

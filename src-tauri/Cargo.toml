@@ -19,3 +19,11 @@ tauri-plugin-dialog = "2"
 tauri-plugin-fs = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+# Whisper.cpp bindings. Metal feature enables GPU acceleration on macOS.
+whisper-rs = { version = "0.13", default-features = false, features = ["metal"] }
+# HTTP client for model downloads (small + uses native TLS so no openssl drama).
+ureq = { version = "2", features = ["tls"] }
+# WAV reader for whisper audio input.
+hound = "3.5"
+# SHA-256 hashing for the whisper transcript cache key.
+sha2 = "0.10"
