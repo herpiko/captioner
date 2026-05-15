@@ -1,4 +1,4 @@
-.PHONY: help install run build build-macos build-macos-arm build-macos-intel build-macos-universal clean check lint fetch-binaries
+.PHONY: help install run build build-macos build-macos-arm build-macos-intel build-macos-universal clean check lint fetch-binaries version set-version release
 .DEFAULT_GOAL := help
 
 NPM ?= npm
@@ -63,3 +63,32 @@ check: ## Type-check frontend + cargo check backend
 clean: ## Remove build artifacts (node_modules and target stay)
 	rm -rf dist
 	rm -rf src-tauri/target/release/bundle
+
+version: ## Print current version
+	@grep -E '^version' src-tauri/Cargo.toml | head -1 | sed -E 's/version = "(.+)"/\1/'
+
+# Bump version atomically across package.json, Cargo.toml, and tauri.conf.json.
+# Usage: make set-version VERSION=0.2.0
+set-version: ## Update version in package.json, Cargo.toml, and tauri.conf.json
+	@if [ -z "$(VERSION)" ]; then echo "Usage: make set-version VERSION=x.y.z"; exit 1; fi
+	@sed -i.bak -E 's/"version": "[^"]+"/"version": "$(VERSION)"/' package.json && rm package.json.bak
+	@sed -i.bak -E '0,/^version = "[^"]+"/s//version = "$(VERSION)"/' src-tauri/Cargo.toml && rm src-tauri/Cargo.toml.bak
+	@sed -i.bak -E 's/"version": "[^"]+"/"version": "$(VERSION)"/' src-tauri/tauri.conf.json && rm src-tauri/tauri.conf.json.bak
+	@echo "Set version to $(VERSION) in package.json, Cargo.toml, tauri.conf.json"
+	@echo "Next: git add -A && git commit -m 'Release v$(VERSION)' && git tag v$(VERSION) && git push --follow-tags"
+
+# Convenience: bump, commit, tag, push in one command.
+# Usage: make release VERSION=0.2.0
+release: ## Bump version, commit, tag v<VERSION>, and push (run on a clean tree)
+	@if [ -z "$(VERSION)" ]; then echo "Usage: make release VERSION=x.y.z"; exit 1; fi
+	@if [ -n "$$(git status --porcelain)" ]; then \
+		echo "Working tree is dirty — commit or stash first."; exit 1; \
+	fi
+	@$(MAKE) set-version VERSION=$(VERSION)
+	@git add package.json src-tauri/Cargo.toml src-tauri/tauri.conf.json
+	@git commit -m "Release v$(VERSION)"
+	@git tag -a v$(VERSION) -m "Release v$(VERSION)"
+	@git push --follow-tags
+	@echo ""
+	@echo "Tagged v$(VERSION) and pushed."
+	@echo "Build the dmg with: make build-macos"
