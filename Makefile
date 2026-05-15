@@ -1,4 +1,4 @@
-.PHONY: help install run build build-macos build-macos-arm build-macos-intel build-macos-universal clean check lint fetch-binaries version set-version release
+.PHONY: help install run build build-macos build-macos-arm build-macos-intel build-macos-universal clean check lint fetch-binaries refetch-binaries version set-version release
 .DEFAULT_GOAL := help
 
 NPM ?= npm
@@ -14,28 +14,41 @@ help: ## Show this help
 install: ## Install JS deps (node_modules)
 	$(NPM) install
 
-fetch-binaries: ## Download ffmpeg/ffprobe macOS binaries into src-tauri/binaries/
-	@mkdir -p $(BIN_DIR)
-	@TMP=$$(mktemp -d) && \
+# File targets: each binary is only fetched when missing. Make's own
+# dependency tracking handles caching — touch / rm a file to re-fetch one.
+$(BIN_DIR)/ffmpeg-aarch64-apple-darwin:
+	@mkdir -p $(BIN_DIR) && TMP=$$(mktemp -d) && \
 	echo "Fetching ffmpeg (arm64)…" && \
-	curl -sSL -o $$TMP/ffmpeg-arm.zip $(FFMPEG_ARM_URL) && \
-	unzip -o -q $$TMP/ffmpeg-arm.zip -d $$TMP/ffmpeg-arm && \
-	cp $$TMP/ffmpeg-arm/ffmpeg $(BIN_DIR)/ffmpeg-aarch64-apple-darwin && \
+	curl -sSL -o $$TMP/a.zip $(FFMPEG_ARM_URL) && \
+	unzip -o -q $$TMP/a.zip -d $$TMP/x && \
+	cp $$TMP/x/ffmpeg $@ && chmod +x $@ && rm -rf $$TMP
+
+$(BIN_DIR)/ffmpeg-x86_64-apple-darwin:
+	@mkdir -p $(BIN_DIR) && TMP=$$(mktemp -d) && \
 	echo "Fetching ffmpeg (x86_64)…" && \
-	curl -sSL -o $$TMP/ffmpeg-intel.zip $(FFMPEG_INTEL_URL) && \
-	unzip -o -q $$TMP/ffmpeg-intel.zip -d $$TMP/ffmpeg-intel && \
-	cp $$TMP/ffmpeg-intel/ffmpeg $(BIN_DIR)/ffmpeg-x86_64-apple-darwin && \
+	curl -sSL -o $$TMP/a.zip $(FFMPEG_INTEL_URL) && \
+	unzip -o -q $$TMP/a.zip -d $$TMP/x && \
+	cp $$TMP/x/ffmpeg $@ && chmod +x $@ && rm -rf $$TMP
+
+$(BIN_DIR)/ffprobe-aarch64-apple-darwin:
+	@mkdir -p $(BIN_DIR) && TMP=$$(mktemp -d) && \
 	echo "Fetching ffprobe (arm64)…" && \
-	curl -sSL -o $$TMP/ffprobe-arm.zip $(FFPROBE_ARM_URL) && \
-	unzip -o -q $$TMP/ffprobe-arm.zip -d $$TMP/ffprobe-arm && \
-	cp $$TMP/ffprobe-arm/ffprobe $(BIN_DIR)/ffprobe-aarch64-apple-darwin && \
+	curl -sSL -o $$TMP/a.zip $(FFPROBE_ARM_URL) && \
+	unzip -o -q $$TMP/a.zip -d $$TMP/x && \
+	cp $$TMP/x/ffprobe $@ && chmod +x $@ && rm -rf $$TMP
+
+$(BIN_DIR)/ffprobe-x86_64-apple-darwin:
+	@mkdir -p $(BIN_DIR) && TMP=$$(mktemp -d) && \
 	echo "Fetching ffprobe (x86_64)…" && \
-	curl -sSL -o $$TMP/ffprobe-intel.zip $(FFPROBE_INTEL_URL) && \
-	unzip -o -q $$TMP/ffprobe-intel.zip -d $$TMP/ffprobe-intel && \
-	cp $$TMP/ffprobe-intel/ffprobe $(BIN_DIR)/ffprobe-x86_64-apple-darwin && \
-	chmod +x $(BIN_DIR)/* && \
-	rm -rf $$TMP
-	@echo "Done. Binaries in $(BIN_DIR):" && ls -lh $(BIN_DIR)
+	curl -sSL -o $$TMP/a.zip $(FFPROBE_INTEL_URL) && \
+	unzip -o -q $$TMP/a.zip -d $$TMP/x && \
+	cp $$TMP/x/ffprobe $@ && chmod +x $@ && rm -rf $$TMP
+
+fetch-binaries: $(BIN_DIR)/ffmpeg-aarch64-apple-darwin $(BIN_DIR)/ffmpeg-x86_64-apple-darwin $(BIN_DIR)/ffprobe-aarch64-apple-darwin $(BIN_DIR)/ffprobe-x86_64-apple-darwin ## Download ffmpeg/ffprobe macOS binaries (cached — only fetches missing ones)
+
+refetch-binaries: ## Force re-download of all ffmpeg/ffprobe binaries
+	rm -f $(BIN_DIR)/ffmpeg-* $(BIN_DIR)/ffprobe-*
+	$(MAKE) fetch-binaries
 
 run: install fetch-binaries ## Run the app in dev mode (tauri dev)
 	$(NPM) run tauri dev
