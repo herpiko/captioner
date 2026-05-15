@@ -82,12 +82,15 @@ version: ## Print current version
 
 # Bump version atomically across package.json, Cargo.toml, and tauri.conf.json.
 # Usage: make set-version VERSION=0.2.0
-set-version: ## Update version in package.json, Cargo.toml, and tauri.conf.json
+set-version: ## Update version in package.json, package-lock.json, Cargo.toml, Cargo.lock, and tauri.conf.json
 	@if [ -z "$(VERSION)" ]; then echo "Usage: make set-version VERSION=x.y.z"; exit 1; fi
 	@sed -i.bak -E 's/"version": "[^"]+"/"version": "$(VERSION)"/' package.json && rm package.json.bak
-	@sed -i.bak -E '0,/^version = "[^"]+"/s//version = "$(VERSION)"/' src-tauri/Cargo.toml && rm src-tauri/Cargo.toml.bak
+	@sed -i.bak -E '1,/^version = "[^"]+"/{ s/^version = "[^"]+"/version = "$(VERSION)"/; }' src-tauri/Cargo.toml && rm src-tauri/Cargo.toml.bak
 	@sed -i.bak -E 's/"version": "[^"]+"/"version": "$(VERSION)"/' src-tauri/tauri.conf.json && rm src-tauri/tauri.conf.json.bak
-	@echo "Set version to $(VERSION) in package.json, Cargo.toml, tauri.conf.json"
+	@$(NPM) install --package-lock-only --silent
+	@cargo check --manifest-path src-tauri/Cargo.toml --offline --quiet 2>/dev/null || \
+		cargo check --manifest-path src-tauri/Cargo.toml --quiet
+	@echo "Set version to $(VERSION) in package.json, package-lock.json, Cargo.toml, Cargo.lock, tauri.conf.json"
 	@echo "Next: git add -A && git commit -m 'Release v$(VERSION)' && git tag v$(VERSION) && git push --follow-tags"
 
 # Convenience: bump, commit, tag, push in one command.
@@ -98,7 +101,7 @@ release: ## Bump version, commit, tag v<VERSION>, and push (run on a clean tree)
 		echo "Working tree is dirty — commit or stash first."; exit 1; \
 	fi
 	@$(MAKE) set-version VERSION=$(VERSION)
-	@git add package.json src-tauri/Cargo.toml src-tauri/tauri.conf.json
+	@git add package.json package-lock.json src-tauri/Cargo.toml src-tauri/Cargo.lock src-tauri/tauri.conf.json
 	@git commit -m "Release v$(VERSION)"
 	@git tag -a v$(VERSION) -m "Release v$(VERSION)"
 	@git push --follow-tags

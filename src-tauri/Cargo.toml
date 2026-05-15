@@ -1,6 +1,6 @@
 [package]
 name = "captioner"
-version = "0.1.0"
+version = "0.2.0"
 description = "Simple linear video editor for adding text captions"
 authors = ["Noctua"]
 edition = "2021"
