@@ -24,10 +24,14 @@ export function useShortcuts() {
       // Space = play/pause toggle. Only when a video is loaded.
       if (e.code === "Space" && !e.metaKey && !e.ctrlKey && !e.altKey) {
         const s = useStore.getState();
-        if (s.videoSrc) {
-          e.preventDefault();
-          s.setPlaying(!s.playing);
-        }
+        if (!s.videoSrc) return;
+        e.preventDefault();
+        // If a button (Play/Pause itself, "+ Caption", etc.) still has focus
+        // from a previous click, Space would normally re-activate it. Drop
+        // focus so the global toggle is the only thing that fires.
+        const active = document.activeElement as HTMLElement | null;
+        if (active && active.tagName === "BUTTON") active.blur();
+        s.setPlaying(!s.playing);
         return;
       }
 

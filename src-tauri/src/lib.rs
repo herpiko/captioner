@@ -1,8 +1,27 @@
 mod whisper;
 
 use serde::{Deserialize, Serialize};
+use std::path::PathBuf;
 use std::process::Command;
 use tauri::AppHandle;
+
+/// Resolve the path to a bundled sidecar binary like ffmpeg/ffprobe.
+///
+/// In a packaged macOS .app, Tauri copies `externalBin` entries into
+/// `Contents/MacOS/` (next to the main executable). In `tauri dev` the
+/// sidecars aren't placed there — fall back to the system PATH so developers
+/// can use their Homebrew ffmpeg without an extra build step.
+pub fn sidecar_path(name: &str) -> PathBuf {
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(dir) = exe.parent() {
+            let candidate = dir.join(name);
+            if candidate.exists() {
+                return candidate;
+            }
+        }
+    }
+    PathBuf::from(name)
+}
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct Caption {
@@ -63,48 +82,33 @@ fn hex_to_ass_color(hex: &str) -> String {
     format!("&H00{:02X}{:02X}{:02X}", b, g, r)
 }
 
-/// Wrap text into lines whose rendered width fits within `max_px`. The
-/// estimate uses a per-glyph average width ≈ font_size * 0.55, which is a
-/// reasonable approximation across the common fonts we offer. Joins lines
-/// with the literal escape sequence "\N" (already-escaped for ASS).
+/// Greedy word-wrap whose target line width fits within `max_px`. The estimate
+/// uses an average glyph width ≈ font_size * 0.55 — close enough across the
+/// fonts we offer. Returns text joined with real '\n' newlines; the caller is
+/// expected to run it through `escape_ass_text` which converts those to `\N`.
 fn wrap_text_for_ass(text: &str, font_size: f64, max_px: f64) -> String {
     let max_chars = ((max_px / (font_size * 0.55)).floor() as usize).max(8);
-    let mut out = String::new();
+    let mut lines: Vec<String> = Vec::new();
     for raw_line in text.split('\n') {
         let mut current = String::new();
         for word in raw_line.split_whitespace() {
-            // Hard-wrap a single very long word.
-            if word.len() > max_chars {
+            if word.chars().count() > max_chars {
                 if !current.is_empty() {
-                    if !out.is_empty() {
-                        out.push_str("\\N");
-                    }
-                    out.push_str(&current);
-                    current.clear();
+                    lines.push(std::mem::take(&mut current));
                 }
-                let bytes = word.as_bytes();
-                let mut i = 0;
-                while i < bytes.len() {
-                    let end = (i + max_chars).min(bytes.len());
-                    if !out.is_empty() {
-                        out.push_str("\\N");
-                    }
-                    out.push_str(std::str::from_utf8(&bytes[i..end]).unwrap_or(""));
-                    i = end;
+                let chars: Vec<char> = word.chars().collect();
+                for chunk in chars.chunks(max_chars) {
+                    lines.push(chunk.iter().collect());
                 }
                 continue;
             }
             let candidate_len = if current.is_empty() {
-                word.len()
+                word.chars().count()
             } else {
-                current.len() + 1 + word.len()
+                current.chars().count() + 1 + word.chars().count()
             };
             if candidate_len > max_chars && !current.is_empty() {
-                if !out.is_empty() {
-                    out.push_str("\\N");
-                }
-                out.push_str(&current);
-                current.clear();
+                lines.push(std::mem::take(&mut current));
                 current.push_str(word);
             } else {
                 if !current.is_empty() {
@@ -114,13 +118,10 @@ fn wrap_text_for_ass(text: &str, font_size: f64, max_px: f64) -> String {
             }
         }
         if !current.is_empty() {
-            if !out.is_empty() {
-                out.push_str("\\N");
-            }
-            out.push_str(&current);
+            lines.push(current);
         }
     }
-    out
+    lines.join("\n")
 }
 
 fn escape_ass_text(text: &str) -> String {
@@ -194,7 +195,11 @@ fn build_ass(width: u32, height: u32, captions: &[Caption]) -> String {
             format_ass_time(c.end),
             style,
             overrides,
-            escape_ass_text(&c.text),
+            escape_ass_text(&wrap_text_for_ass(
+                &c.text,
+                c.font_size,
+                width as f64 * 0.92,
+            )),
         ));
     }
 
@@ -209,7 +214,7 @@ async fn probe_video(path: String) -> Result<VideoInfo, String> {
 }
 
 fn probe_video_blocking(path: &str) -> Result<VideoInfo, String> {
-    let output = Command::new("ffprobe")
+    let output = Command::new(sidecar_path("ffprobe"))
         .args([
             "-v", "error",
             "-select_streams", "v:0",
@@ -258,7 +263,7 @@ async fn export_video(req: ExportRequest) -> Result<String, String> {
             .replace('\'', "\\'");
         let filter = format!("subtitles='{}'", escaped);
 
-        let output = Command::new("ffmpeg")
+        let output = Command::new(sidecar_path("ffmpeg"))
             .args([
                 "-y",
                 "-i", &req.video_path,
@@ -286,15 +291,25 @@ async fn export_video(req: ExportRequest) -> Result<String, String> {
 }
 
 #[tauri::command]
-fn model_status(app: AppHandle) -> Result<whisper::ModelStatus, String> {
-    whisper::model_status(&app)
+fn list_models(app: AppHandle) -> Result<Vec<whisper::ModelStatus>, String> {
+    whisper::list_models(&app)
 }
 
 #[tauri::command]
-async fn download_model(app: AppHandle) -> Result<(), String> {
-    tauri::async_runtime::spawn_blocking(move || whisper::download_model(app))
+fn model_status(app: AppHandle, name: String) -> Result<whisper::ModelStatus, String> {
+    whisper::model_status(&app, &name)
+}
+
+#[tauri::command]
+async fn download_model(app: AppHandle, name: String) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || whisper::download_model(app, name))
         .await
         .map_err(|e| format!("spawn_blocking join: {}", e))?
+}
+
+#[tauri::command]
+fn delete_model(app: AppHandle, name: String) -> Result<(), String> {
+    whisper::delete_model(&app, &name)
 }
 
 #[tauri::command]
@@ -321,8 +336,10 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             probe_video,
             export_video,
+            list_models,
             model_status,
             download_model,
+            delete_model,
             transcribe,
             clear_transcribe_cache
         ])

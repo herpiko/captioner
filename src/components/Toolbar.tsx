@@ -1,12 +1,11 @@
 import { useState } from "react";
-import { open, save } from "@tauri-apps/plugin-dialog";
-import { invoke, convertFileSrc } from "@tauri-apps/api/core";
+import { save } from "@tauri-apps/plugin-dialog";
+import { invoke } from "@tauri-apps/api/core";
 import { revealItemInDir } from "@tauri-apps/plugin-opener";
 import { useStore } from "../store";
 import { DefaultsDialog } from "./DefaultsDialog";
 import { AutoCaptionDialog } from "./AutoCaptionDialog";
-
-type VideoInfo = { width: number; height: number; duration: number };
+import { useOpenVideo } from "../hooks/useOpenVideo";
 
 export function Toolbar() {
   const {
@@ -18,8 +17,8 @@ export function Toolbar() {
     exporting,
     setExporting,
   } = useStore();
-  const setVideo = useStore((s) => s.setVideo);
   const clearCaptions = useStore((s) => s.clearCaptions);
+  const onOpen = useOpenVideo();
   const undo = useStore((s) => s.undo);
   const redo = useStore((s) => s.redo);
   const pastLen = useStore((s) => s._past.length);
@@ -30,26 +29,6 @@ export function Toolbar() {
   const [showDefaults, setShowDefaults] = useState(false);
   const [showAutoCaption, setShowAutoCaption] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
-
-  const onOpen = async () => {
-    const selected = await open({
-      multiple: false,
-      filters: [
-        {
-          name: "Video",
-          extensions: ["mp4", "mov", "mkv", "avi", "webm", "m4v"],
-        },
-      ],
-    });
-    if (!selected || typeof selected !== "string") return;
-    try {
-      const info = await invoke<VideoInfo>("probe_video", { path: selected });
-      const src = convertFileSrc(selected);
-      setVideo(selected, src, info.width, info.height, info.duration);
-    } catch (err) {
-      alert(`Failed to load video: ${err}`);
-    }
-  };
 
   const onAddCaption = () => {
     const id = addCaption();

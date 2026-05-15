@@ -9,14 +9,56 @@ use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, Manager};
 use whisper_rs::{FullParams, SamplingStrategy, WhisperContext, WhisperContextParameters};
 
-const MODEL_FILENAME: &str = "ggml-small.bin";
-const MODEL_URL: &str =
-    "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small.bin";
-// Expected size in bytes (~466 MB). Used only as a sanity hint for the UI.
-pub const MODEL_EXPECTED_SIZE: u64 = 487_601_968;
+/// Catalogue of supported whisper.cpp ggml models.
+/// Source: https://huggingface.co/ggerganov/whisper.cpp
+struct ModelInfo {
+    name: &'static str,
+    filename: &'static str,
+    url: &'static str,
+    expected_size: u64,
+    label: &'static str,
+    description: &'static str,
+}
+
+const MODELS: &[ModelInfo] = &[
+    ModelInfo {
+        name: "small",
+        filename: "ggml-small.bin",
+        url: "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small.bin",
+        expected_size: 487_601_968,
+        label: "Small",
+        description: "Good balance. Recommended default.",
+    },
+    ModelInfo {
+        name: "medium",
+        filename: "ggml-medium.bin",
+        url: "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-medium.bin",
+        expected_size: 1_533_763_059,
+        label: "Medium",
+        description: "Higher accuracy, especially for Indonesian. Slower.",
+    },
+    ModelInfo {
+        name: "large-v3",
+        filename: "ggml-large-v3.bin",
+        url: "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3.bin",
+        expected_size: 3_094_623_691,
+        label: "Large v3",
+        description: "Best accuracy. Significantly slower; needs ample disk + memory.",
+    },
+];
+
+fn find_model(name: &str) -> Result<&'static ModelInfo, String> {
+    MODELS
+        .iter()
+        .find(|m| m.name == name)
+        .ok_or_else(|| format!("unknown model: {}", name))
+}
 
 #[derive(Debug, Serialize)]
 pub struct ModelStatus {
+    pub name: String,
+    pub label: String,
+    pub description: String,
     pub downloaded: bool,
     pub path: String,
     pub expected_size: u64,
@@ -25,6 +67,7 @@ pub struct ModelStatus {
 
 #[derive(Clone, Debug, Serialize)]
 struct DownloadProgress {
+    model: String,
     downloaded: u64,
     total: u64,
 }
@@ -34,6 +77,7 @@ pub struct TranscribeRequest {
     #[serde(rename = "videoPath")]
     pub video_path: String,
     pub language: String,
+    pub model: String,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -57,10 +101,11 @@ struct CacheEntry {
     /// way that would invalidate old entries.
     version: u32,
     language: String,
+    model: String,
     segments: Vec<Segment>,
 }
 
-const CACHE_VERSION: u32 = 1;
+const CACHE_VERSION: u32 = 3;
 
 fn models_dir(app: &AppHandle) -> Result<PathBuf, String> {
     let dir = app
@@ -83,8 +128,13 @@ fn cache_dir(app: &AppHandle) -> Result<PathBuf, String> {
     Ok(dir)
 }
 
-fn cache_key_path(app: &AppHandle, audio_hash: &str, language: &str) -> Result<PathBuf, String> {
-    Ok(cache_dir(app)?.join(format!("{}-{}.json", audio_hash, language)))
+fn cache_key_path(
+    app: &AppHandle,
+    audio_hash: &str,
+    language: &str,
+    model: &str,
+) -> Result<PathBuf, String> {
+    Ok(cache_dir(app)?.join(format!("{}-{}-{}.json", audio_hash, language, model)))
 }
 
 fn hash_audio(samples: &[f32]) -> String {
@@ -138,40 +188,72 @@ pub fn clear_cache(app: &AppHandle) -> Result<usize, String> {
     Ok(removed)
 }
 
-fn model_path(app: &AppHandle) -> Result<PathBuf, String> {
-    Ok(models_dir(app)?.join(MODEL_FILENAME))
+fn model_path(app: &AppHandle, info: &ModelInfo) -> Result<PathBuf, String> {
+    Ok(models_dir(app)?.join(info.filename))
 }
 
-pub fn model_status(app: &AppHandle) -> Result<ModelStatus, String> {
-    let path = model_path(app)?;
+fn build_status(app: &AppHandle, info: &ModelInfo) -> Result<ModelStatus, String> {
+    let path = model_path(app, info)?;
     let (downloaded, size) = match std::fs::metadata(&path) {
-        Ok(m) => (m.len() >= MODEL_EXPECTED_SIZE - 1_000_000, m.len()),
+        Ok(m) => (m.len() >= info.expected_size - 1_000_000, m.len()),
         Err(_) => (false, 0),
     };
     Ok(ModelStatus {
+        name: info.name.to_string(),
+        label: info.label.to_string(),
+        description: info.description.to_string(),
         downloaded,
         path: path.to_string_lossy().to_string(),
-        expected_size: MODEL_EXPECTED_SIZE,
+        expected_size: info.expected_size,
         downloaded_size: size,
     })
 }
 
-/// Stream the model file to disk, emitting `model-download-progress` events.
+pub fn list_models(app: &AppHandle) -> Result<Vec<ModelStatus>, String> {
+    MODELS.iter().map(|m| build_status(app, m)).collect()
+}
+
+pub fn model_status(app: &AppHandle, name: &str) -> Result<ModelStatus, String> {
+    build_status(app, find_model(name)?)
+}
+
+pub fn delete_model(app: &AppHandle, name: &str) -> Result<(), String> {
+    let info = find_model(name)?;
+    let path = model_path(app, info)?;
+    match std::fs::remove_file(&path) {
+        Ok(_) => Ok(()),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(e) => Err(format!("delete model: {}", e)),
+    }?;
+    // If this model was the currently-loaded one, drop the cached context so a
+    // subsequent transcribe doesn't try to use a freed model.
+    let mut guard = CONTEXT_CACHE.lock().unwrap();
+    if let Some(c) = guard.as_ref() {
+        if c.path == path {
+            *guard = None;
+        }
+    }
+    Ok(())
+}
+
+/// Stream the model file to disk, emitting `model-download-progress` events
+/// with the model name so the UI can route progress to the right row.
 /// Writes to a `.part` file and renames on success so partial downloads can't
 /// be mistaken for complete ones.
-pub fn download_model(app: AppHandle) -> Result<(), String> {
-    let final_path = model_path(&app)?;
+pub fn download_model(app: AppHandle, name: String) -> Result<(), String> {
+    let info = find_model(&name)?;
+    let final_path = model_path(&app, info)?;
     let part_path = final_path.with_extension("part");
 
-    let resp = ureq::get(MODEL_URL)
-        .timeout(Duration::from_secs(600))
+    let resp = ureq::get(info.url)
+        .timeout(Duration::from_secs(1800))
         .call()
         .map_err(|e| format!("HTTP error: {}", e))?;
 
     let total: u64 = resp
         .header("Content-Length")
         .and_then(|v| v.parse().ok())
-        .unwrap_or(MODEL_EXPECTED_SIZE);
+        .unwrap_or(info.expected_size);
 
     let mut reader = resp.into_reader();
     let mut writer = BufWriter::new(
@@ -183,7 +265,11 @@ pub fn download_model(app: AppHandle) -> Result<(), String> {
     let mut last_emit = Instant::now();
     let _ = app.emit(
         "model-download-progress",
-        DownloadProgress { downloaded: 0, total },
+        DownloadProgress {
+            model: name.clone(),
+            downloaded: 0,
+            total,
+        },
     );
 
     loop {
@@ -200,7 +286,11 @@ pub fn download_model(app: AppHandle) -> Result<(), String> {
         if last_emit.elapsed() >= Duration::from_millis(150) {
             let _ = app.emit(
                 "model-download-progress",
-                DownloadProgress { downloaded, total },
+                DownloadProgress {
+                    model: name.clone(),
+                    downloaded,
+                    total,
+                },
             );
             last_emit = Instant::now();
         }
@@ -216,6 +306,7 @@ pub fn download_model(app: AppHandle) -> Result<(), String> {
     let _ = app.emit(
         "model-download-progress",
         DownloadProgress {
+            model: name,
             downloaded: total,
             total,
         },
@@ -251,7 +342,7 @@ fn load_context(path: &Path) -> Result<(), String> {
 }
 
 fn extract_audio(video_path: &str, wav_path: &Path) -> Result<(), String> {
-    let output = Command::new("ffmpeg")
+    let output = Command::new(crate::sidecar_path("ffmpeg"))
         .args([
             "-y",
             "-i", video_path,
@@ -287,9 +378,13 @@ fn read_wav_f32(path: &Path) -> Result<Vec<f32>, String> {
 }
 
 pub fn transcribe(app: AppHandle, req: TranscribeRequest) -> Result<Vec<Segment>, String> {
-    let path = model_path(&app)?;
+    let info = find_model(&req.model)?;
+    let path = model_path(&app, info)?;
     if !path.exists() {
-        return Err("Model not downloaded yet — open Settings to download it.".into());
+        return Err(format!(
+            "Model '{}' is not downloaded — download it in Settings first.",
+            info.label
+        ));
     }
 
     let tmp_dir = std::env::temp_dir();
@@ -302,7 +397,7 @@ pub fn transcribe(app: AppHandle, req: TranscribeRequest) -> Result<Vec<Segment>
         // Cache lookup: hash the actual audio samples, key by (hash, language).
         // Same audio in a re-encoded video → same hash → instant return.
         let audio_hash = hash_audio(&audio);
-        let cache_file = cache_key_path(&app, &audio_hash, &req.language)?;
+        let cache_file = cache_key_path(&app, &audio_hash, &req.language, &req.model)?;
         if let Some(entry) = read_cache(&cache_file) {
             return Ok(entry.segments);
         }
@@ -324,6 +419,16 @@ pub fn transcribe(app: AppHandle, req: TranscribeRequest) -> Result<Vec<Segment>
         params.set_print_timestamps(false);
         // Token-level timestamps so the JS side can split segments accurately.
         params.set_token_timestamps(true);
+        // --- Hallucination filtering during non-speech audio (music, ambient) ---
+        // Drop segments with high no-speech probability — primary defence.
+        params.set_no_speech_thold(0.6);
+        // Drop low-confidence segments (whisper hallucinations score poorly).
+        params.set_logprob_thold(-1.0);
+        // Drop high-entropy / random-looking segments.
+        params.set_entropy_thold(2.4);
+        // Don't emit non-speech tokens like ♪ that whisper sometimes invents.
+        params.set_suppress_non_speech_tokens(true);
+        params.set_suppress_blank(true);
         // Use available CPU threads to speed up.
         let threads = std::thread::available_parallelism()
             .map(|n| n.get() as i32)
@@ -384,6 +489,7 @@ pub fn transcribe(app: AppHandle, req: TranscribeRequest) -> Result<Vec<Segment>
         let entry = CacheEntry {
             version: CACHE_VERSION,
             language: req.language.clone(),
+            model: req.model.clone(),
             // Clone the segments into the cache so we can still return `segs`.
             segments: segs
                 .iter()

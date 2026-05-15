@@ -1,9 +1,11 @@
 import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { listen } from "@tauri-apps/api/event";
 import { Caption, useStore } from "../store";
 
 type ModelStatus = {
+  name: string;
+  label: string;
+  description: string;
   downloaded: boolean;
   path: string;
   expected_size: number;
@@ -32,62 +34,39 @@ export function AutoCaptionDialog({ onClose }: { onClose: () => void }) {
   const videoPath = useStore((s) => s.videoPath);
   const defaults = useStore((s) => s.defaults);
   const replaceCaptions = useStore((s) => s.replaceCaptions);
+  const clearCaptions = useStore((s) => s.clearCaptions);
+  const setZoom = useStore((s) => s.setZoom);
   const setTranscribing = useStore((s) => s.setTranscribing);
+  const activeModel = useStore((s) => s.activeModel);
 
   const [status, setStatus] = useState<ModelStatus | null>(null);
   const [language, setLanguage] = useState<string>("en");
-  const [downloading, setDownloading] = useState(false);
-  const [progress, setProgress] = useState<{
-    downloaded: number;
-    total: number;
-  } | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  // Load model status when the dialog opens.
+  // Reload the active model's status when the dialog opens or the active model changes.
   useEffect(() => {
-    invoke<ModelStatus>("model_status")
+    invoke<ModelStatus>("model_status", { name: activeModel })
       .then(setStatus)
       .catch((e) => setError(String(e)));
-  }, []);
-
-  // Listen to download progress events from Rust.
-  useEffect(() => {
-    const unlisten = listen<{ downloaded: number; total: number }>(
-      "model-download-progress",
-      (event) => setProgress(event.payload)
-    );
-    return () => {
-      unlisten.then((u) => u());
-    };
-  }, []);
-
-  const onDownload = async () => {
-    setError(null);
-    setDownloading(true);
-    setProgress({ downloaded: 0, total: status?.expected_size ?? 0 });
-    try {
-      await invoke("download_model");
-      const fresh = await invoke<ModelStatus>("model_status");
-      setStatus(fresh);
-    } catch (e) {
-      setError(String(e));
-    } finally {
-      setDownloading(false);
-    }
-  };
+  }, [activeModel]);
 
   const onRun = async () => {
     if (!videoPath || !status?.downloaded) return;
     setError(null);
     onClose();
+    // Wipe any existing captions before starting so the user sees a clean
+    // track while we transcribe and the new captions land into an empty
+    // timeline (not on top of stale ones).
+    clearCaptions();
     setTranscribing(true);
     try {
       const segments = await invoke<Segment[]>("transcribe", {
-        req: { videoPath, language },
+        req: { videoPath, language, model: activeModel },
       });
       const maxDur = defaults.autoCaptionDurationSec;
       const allTokens: Token[] = segments
         .filter((s) => s.text.trim().length > 0 && s.end > s.start)
+        .filter((s) => !isHallucination(s.text))
         .flatMap((s) =>
           // If a segment has no usable tokens, fall back to a synthetic
           // single-token covering the whole segment.
@@ -96,7 +75,9 @@ export function AutoCaptionDialog({ onClose }: { onClose: () => void }) {
             : [{ start: s.start, end: s.end, text: s.text }]
         )
         .filter((t) => t.end > t.start);
-      const expanded = chunkTokens(allTokens, maxDur);
+      const expanded = chunkTokens(allTokens, maxDur).filter(
+        (c) => !isHallucination(c.text)
+      );
       const now = Date.now();
       const captions: Caption[] = expanded.map((s, i) => ({
         id: `auto-${now}-${i}`,
@@ -114,17 +95,14 @@ export function AutoCaptionDialog({ onClose }: { onClose: () => void }) {
         bgEnabled: defaults.bgEnabled,
       }));
       replaceCaptions(captions);
+      // Autozoom so the user can see the dense auto-generated captions.
+      setZoom(6);
     } catch (e) {
       setError(String(e));
     } finally {
       setTranscribing(false);
     }
   };
-
-  const pct =
-    progress && progress.total > 0
-      ? Math.min(100, (progress.downloaded / progress.total) * 100)
-      : 0;
 
   return (
     <div
@@ -157,7 +135,6 @@ export function AutoCaptionDialog({ onClose }: { onClose: () => void }) {
             value={language}
             onChange={(e) => setLanguage(e.target.value)}
             className="w-full"
-            disabled={downloading}
           >
             {LANGUAGES.map((l) => (
               <option key={l.code} value={l.code}>
@@ -168,36 +145,22 @@ export function AutoCaptionDialog({ onClose }: { onClose: () => void }) {
         </div>
 
         <div className="mb-4 p-3 surface-2 border border-line rounded">
-          <div className="text-xs text-muted mb-1">Whisper model (small, ~466 MB)</div>
-          {status?.downloaded ? (
-            <div className="text-xs text-green-600">Model ready</div>
-          ) : downloading ? (
-            <div>
-              <div className="text-xs text-default mb-1">
-                Downloading… {pct.toFixed(0)}%
-                {progress && progress.total > 0 && (
-                  <span className="text-muted ml-1">
-                    ({fmtMB(progress.downloaded)} / {fmtMB(progress.total)})
-                  </span>
+          <div className="text-xs text-muted mb-1">Model</div>
+          {status ? (
+            <div className="flex items-center justify-between gap-2">
+              <div className="min-w-0">
+                <div className="text-sm font-medium truncate">{status.label}</div>
+                {status.downloaded ? (
+                  <div className="text-[11px] text-green-600">Ready</div>
+                ) : (
+                  <div className="text-[11px] text-red-500">
+                    Not downloaded — open Settings to download.
+                  </div>
                 )}
-              </div>
-              <div
-                className="w-full h-1.5 rounded overflow-hidden"
-                style={{ background: "var(--border-line)" }}
-              >
-                <div
-                  className="h-full bg-blue-500 transition-[width]"
-                  style={{ width: `${pct}%` }}
-                />
               </div>
             </div>
           ) : (
-            <button
-              onClick={onDownload}
-              className="px-3 py-1.5 rounded bg-blue-600 hover:bg-blue-500 text-white text-sm"
-            >
-              Download model
-            </button>
+            <div className="text-xs text-muted">Checking model status…</div>
           )}
         </div>
 
@@ -214,7 +177,7 @@ export function AutoCaptionDialog({ onClose }: { onClose: () => void }) {
           </button>
           <button
             onClick={onRun}
-            disabled={!status?.downloaded || !videoPath || downloading}
+            disabled={!status?.downloaded || !videoPath}
             className="px-4 py-1.5 rounded bg-blue-600 hover:bg-blue-500 text-white text-sm disabled:opacity-40"
           >
             Auto Caption
@@ -223,10 +186,6 @@ export function AutoCaptionDialog({ onClose }: { onClose: () => void }) {
       </div>
     </div>
   );
-}
-
-function fmtMB(bytes: number): string {
-  return `${(bytes / 1_000_000).toFixed(0)} MB`;
 }
 
 /**
@@ -240,6 +199,39 @@ function fmtMB(bytes: number): string {
  *  - Timestamps are taken from the actual token times, so captions stay glued
  *    to the audio regardless of speech rate.
  */
+/**
+ * Whisper occasionally emits canned hallucinations during music or non-speech
+ * audio — most famously "Thank you for watching", "Please subscribe", music
+ * symbols, etc. Catch the common ones here as a safety net (the Rust side
+ * already drops most via no_speech_thold + suppress_non_speech_tokens).
+ */
+const HALLUCINATION_PATTERNS: RegExp[] = [
+  /^\s*[♪♫🎵🎶]\s*[^a-z0-9]*\s*$/i,
+  /thank(s)?\s+(you\s+)?(for\s+)?(watching|listening)/i,
+  /(please\s+)?(like\s+(and\s+)?)?subscribe/i,
+  /(don'?t\s+forget\s+to\s+)?(like|hit)\s+(and\s+)?(the\s+)?(like|subscribe|bell)/i,
+  /turn\s+on\s+(the\s+)?notification/i,
+  /see\s+you\s+(in\s+the\s+)?next\s+(video|one)/i,
+  /^\s*[\.\-_,\s]*\s*$/, // pure punctuation / dashes / dots
+  /^\s*\(.*\)\s*$/, // entire caption is parenthetical, like "(music)"
+  /^\s*\[.*\]\s*$/, // entire caption is bracketed, like "[Music]"
+];
+
+function isHallucination(text: string): boolean {
+  const t = text.trim();
+  if (!t) return true;
+  for (const re of HALLUCINATION_PATTERNS) {
+    if (re.test(t)) return true;
+  }
+  // Highly repetitive same-word output ("you you you you you").
+  const words = t.toLowerCase().split(/\s+/);
+  if (words.length >= 4) {
+    const unique = new Set(words);
+    if (unique.size === 1) return true;
+  }
+  return false;
+}
+
 const MIN_CHUNK = 0.5;
 const HARD_MULT = 1.25;
 // If a token starts more than this many seconds after the previous token ends,

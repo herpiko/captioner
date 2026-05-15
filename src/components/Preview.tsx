@@ -1,5 +1,6 @@
 import { useEffect, useRef } from "react";
 import { useStore, Caption } from "../store";
+import { useOpenVideo } from "../hooks/useOpenVideo";
 
 export function Preview() {
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -37,7 +38,25 @@ export function Preview() {
     }
   }, [currentTime]);
 
+  // While playing, drive currentTime from a rAF loop so the playhead moves
+  // every frame instead of every ~250 ms when the <video> fires `timeupdate`.
+  useEffect(() => {
+    if (!playing) return;
+    let raf = 0;
+    const tick = () => {
+      const v = videoRef.current;
+      if (v) setCurrentTime(v.currentTime);
+      raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [playing, setCurrentTime]);
+
   const onTimeUpdate = () => {
+    // Still fire on the native event so paused-state seeks (e.g. user clicked
+    // a frame inside the video) reflect in the store. While playing, the rAF
+    // loop above is the authoritative source.
+    if (playing) return;
     const v = videoRef.current;
     if (!v) return;
     setCurrentTime(v.currentTime);
@@ -75,10 +94,16 @@ export function Preview() {
     window.addEventListener("pointerup", up);
   };
 
+  const openVideo = useOpenVideo();
   if (!videoSrc) {
     return (
-      <div className="flex-1 flex items-center justify-center text-muted">
-        Open a video to begin
+      <div className="flex-1 flex items-center justify-center">
+        <button
+          onClick={openVideo}
+          className="px-5 py-2.5 rounded btn-soft text-sm"
+        >
+          Open a video to begin
+        </button>
       </div>
     );
   }
@@ -160,7 +185,7 @@ function CaptionOverlay({
         left: `${c.x * 100}%`,
         top: `${c.y * 100}%`,
         transform: "translate(-50%, -50%)",
-        maxWidth: "90%",
+        maxWidth: "96%",
         fontFamily: c.fontFamily,
         fontSize: `${fs}px`,
         color: c.color,

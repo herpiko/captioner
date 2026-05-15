@@ -24,7 +24,7 @@ export type CaptionDefaults = Omit<Caption, "id" | "text" | "start" | "end"> & {
 
 const FACTORY_DEFAULTS: CaptionDefaults = {
   durationSec: 3,
-  autoCaptionDurationSec: 2,
+  autoCaptionDurationSec: 3,
   x: 0.5,
   y: 0.85,
   fontFamily: "Arial",
@@ -38,8 +38,27 @@ const FACTORY_DEFAULTS: CaptionDefaults = {
 
 const DEFAULTS_KEY = "captioner.defaults.v1";
 const THEME_KEY = "captioner.theme.v1";
+const ACTIVE_MODEL_KEY = "captioner.activeModel.v1";
 
 export type Theme = "light" | "dark";
+
+function loadActiveModel(): string {
+  try {
+    const v = localStorage.getItem(ACTIVE_MODEL_KEY);
+    if (v) return v;
+  } catch {
+    // ignore
+  }
+  return "small";
+}
+
+function saveActiveModel(name: string) {
+  try {
+    localStorage.setItem(ACTIVE_MODEL_KEY, name);
+  } catch {
+    // ignore
+  }
+}
 
 function loadTheme(): Theme {
   try {
@@ -103,6 +122,7 @@ type State = {
 
   defaults: CaptionDefaults;
   theme: Theme;
+  activeModel: string;
 
   _past: Snapshot[];
   _future: Snapshot[];
@@ -132,6 +152,7 @@ type State = {
   setDefaults: (patch: Partial<CaptionDefaults>) => void;
   resetDefaults: () => void;
   setTheme: (t: Theme) => void;
+  setActiveModel: (name: string) => void;
 
   beginTransaction: () => void;
   commitTransaction: () => void;
@@ -194,6 +215,7 @@ export const useStore = create<State>((set, get) => ({
 
   defaults: loadDefaults(),
   theme: loadTheme(),
+  activeModel: loadActiveModel(),
 
   _past: [],
   _future: [],
@@ -295,6 +317,11 @@ export const useStore = create<State>((set, get) => ({
   setTheme: (t) => {
     saveTheme(t);
     set({ theme: t });
+  },
+
+  setActiveModel: (name) => {
+    saveActiveModel(name);
+    set({ activeModel: name });
   },
 
   beginTransaction: () => {

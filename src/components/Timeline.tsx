@@ -16,6 +16,7 @@ export function Timeline() {
   const {
     duration,
     currentTime,
+    playing,
     captions,
     selectedId,
     zoom,
@@ -60,9 +61,55 @@ export function Timeline() {
     return () => viewport.removeEventListener("wheel", onWheel);
   }, [zoom, duration, setZoom]);
 
+  // Auto-scroll: while playing, run a rAF loop that smoothly tracks the
+  // playhead. We only start tracking when the playhead crosses 75% of the
+  // visible viewport (or falls off the left). Once tracking, scrollLeft
+  // eases toward a target that keeps the playhead near 25%, producing a
+  // continuous follow motion instead of a jump.
+  useEffect(() => {
+    if (!playing || !duration) return;
+    const viewport = viewportRef.current;
+    if (!viewport) return;
+    let raf = 0;
+    let tracking = false;
+    const tick = () => {
+      const innerWidth = viewport.scrollWidth;
+      if (innerWidth > viewport.clientWidth) {
+        const t = useStore.getState().currentTime;
+        const playheadX = (t / duration) * innerWidth;
+        const visibleStart = viewport.scrollLeft;
+        const visibleEnd = visibleStart + viewport.clientWidth;
+        const threshold = visibleStart + viewport.clientWidth * 0.75;
+        // Start tracking once we cross the threshold, or restart if the playhead
+        // has jumped offscreen (e.g. user scrubbed).
+        if (!tracking && (playheadX >= threshold || playheadX < visibleStart)) {
+          tracking = true;
+        }
+        if (tracking) {
+          const target = playheadX - viewport.clientWidth * 0.25;
+          const maxScroll = innerWidth - viewport.clientWidth;
+          const clamped = Math.max(0, Math.min(maxScroll, target));
+          // Exponential ease: covers ~20% of the remaining gap each frame.
+          // At 60fps this catches up in ~10 frames (~165 ms) with no overshoot.
+          const next = visibleStart + (clamped - visibleStart) * 0.2;
+          // Stop scrolling once we've snapped close enough — prevents jitter at
+          // sub-pixel deltas.
+          viewport.scrollLeft = Math.abs(clamped - next) < 0.5 ? clamped : next;
+          // If user scrubbed backwards offscreen, stop tracking once back inside.
+          if (playheadX < visibleEnd && playheadX >= visibleStart + viewport.clientWidth * 0.25) {
+            // still inside the 25%-75% band after scroll; keep tracking
+          }
+        }
+      }
+      raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [playing, duration]);
+
   if (!duration) {
     return (
-      <div className="h-40 border-t border-line surface flex items-center justify-center text-faint text-sm">
+      <div className="h-40 m-[10px] border border-line rounded surface flex items-center justify-center text-faint text-sm">
         Timeline appears after loading a video
       </div>
     );
@@ -152,7 +199,7 @@ export function Timeline() {
   }
 
   return (
-    <div className="relative border-t border-line surface select-none">
+    <div className="relative m-[10px] border border-line rounded surface select-none overflow-hidden">
       <div
         ref={viewportRef}
         className="overflow-x-auto overflow-y-hidden"
