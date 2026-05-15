@@ -22,6 +22,29 @@ AI-powered auto-captioning. Built with Tauri 2, React, TypeScript, and
 - For development: Node 18+, Rust toolchain, `cmake` (`brew install cmake`).
 - FFmpeg / FFprobe binaries are bundled into the released `.app`; no host install needed for end users.
 
+## Installing the released DMG
+
+Captioner is not yet signed with an Apple Developer ID. macOS Gatekeeper
+will quarantine the download and may show:
+
+> "Captioner is damaged and can't be opened. You should eject the disk image."
+
+The app is **not actually damaged** — Gatekeeper applies this label to any
+unsigned app downloaded from the internet. To run it, remove the quarantine
+attribute after copying the app to `/Applications`:
+
+```bash
+xattr -dr com.apple.quarantine /Applications/Captioner.app
+```
+
+You only need to do this once per install. Subsequent launches work normally.
+
+Alternatively, in **System Settings → Privacy & Security**, after the first
+blocked launch attempt you'll see an "Open Anyway" button for Captioner —
+clicking it permits future launches.
+
+Proper code-signing and notarization will be added in a future release.
+
 ## Build & run
 
 A `Makefile` wraps the common tasks:
